@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>BT Chat Compliance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; color: #0f172a; -webkit-tap-highlight-color: transparent; }
+        .bubble { padding: 10px 14px; border-radius: 18px; max-width: 80%; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .me { background: #3b82f6; color: white; border-bottom-right-radius: 4px; margin-left: auto; }
+        .other { background: white; color: #1e293b; border-bottom-left-radius: 4px; margin-right: auto; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden flex flex-col">
+
+    <!-- ÉCRAN 1 : PERMISSION GUARD (Visible au démarrage) -->
+    <div id="permScreen" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-8 text-center">
+        <div class="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        </div>
+        <h1 class="text-2xl font-bold text-slate-800 mb-2">Autorisation requise</h1>
+        <p class="text-slate-500 text-sm mb-8 leading-relaxed">
+            Pour détecter les appareils Bluetooth autour de vous, Android nécessite votre accord explicite.
+        </p>
+        <button onclick="requestStrictPermissions()" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition">
+            Continuer
+        </button>
+        <p id="permStatus" class="text-xs text-red-500 mt-4 font-bold hidden">Permissions manquantes. Réessayez.</p>
+    </div>
+
+    <!-- ÉCRAN 2 : APP PRINCIPALE (Cachée au début) -->
+    <div id="appScreen" class="flex flex-col h-full hidden">
+        <!-- Header -->
+        <div class="bg-white p-4 shadow-sm border-b flex justify-between items-center z-10">
+            <div>
+                <h1 class="font-bold text-lg text-slate-800">Bluetooth Chat</h1>
+                <p id="status" class="text-xs text-slate-400 font-medium">Déconnecté</p>
+            </div>
+            <button onclick="scan()" class="bg-slate-100 p-2 rounded-lg text-blue-600 font-bold text-xs uppercase hover:bg-blue-50">Scanner</button>
+        </div>
+
+        <!-- Chat Area -->
+        <div id="msgList" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+            <div class="text-center mt-10">
+                <div class="inline-block p-3 bg-blue-50 text-blue-600 rounded-full mb-3 text-xs font-bold">PRÊT À CONNECTER</div>
+                <p class="text-xs text-slate-400">Cliquez sur Scanner pour commencer.</p>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-3 bg-white border-t flex gap-2">
+            <input id="input" type="text" class="flex-1 bg-slate-100 rounded-xl px-4 py-3 outline-none text-sm focus:ring-2 focus:ring-blue-100 transition" placeholder="Écrire un message...">
+            <button onclick="send()" class="bg-blue-600 text-white p-3 rounded-xl shadow-md active:scale-90 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        function log(m, type='sys') {
+            if(type === 'sys') return; // On masque les logs système pour l'utilisateur final
+            const d = document.createElement('div');
+            d.className = `bubble ${type}`;
+            d.innerText = m;
+            const list = document.getElementById('msgList');
+            list.appendChild(d);
+            list.scrollTop = list.scrollHeight;
+        }
+
+        function showApp() {
+            document.getElementById('permScreen').style.display = 'none';
+            document.getElementById('appScreen').classList.remove('hidden');
+            
+            // On s'abonne aux messages entrants dès que l'app est affichée
+            bluetoothSerial.subscribe('\n', data => log(data, 'other'), err => {});
+        }
+
+        // --- GESTION STRICTE DES PERMISSIONS ---
+        function requestStrictPermissions() {
+            if(!window.cordova) return showApp(); // Mode Test PC
+            
+            const p = cordova.plugins.permissions;
+            const required = [
+                p.BLUETOOTH_SCAN,
+                p.BLUETOOTH_CONNECT,
+                p.BLUETOOTH_ADVERTISE,
+                p.ACCESS_FINE_LOCATION
+            ];
+
+            p.requestPermissions(required, function(status) {
+                if(!status.hasPermission) {
+                    document.getElementById('permStatus').style.display = 'block';
+                } else {
+                    // Double sécurité : activer le Bluetooth
+                    bluetoothSerial.enable(
+                        function() { showApp(); },
+                        function() { alert("Le Bluetooth doit être activé !"); }
+                    );
+                }
+            }, function() {
+                document.getElementById('permStatus').style.display = 'block';
+                document.getElementById('permStatus').innerText = "Erreur système critique.";
+            });
+        }
+
+        function scan() {
+            document.getElementById('msgList').innerHTML = '<div class="text-center text-xs text-slate-400 mt-4">Recherche en cours...</div>';
+            
+            bluetoothSerial.list(function(devices) {
+                document.getElementById('msgList').innerHTML = ''; // Clear
+                if(devices.length === 0) {
+                    const d = document.createElement('div');
+                    d.className = "text-center text-xs text-red-400 mt-4";
+                    d.innerText = "Aucun appareil associé trouvé.";
+                    document.getElementById('msgList').appendChild(d);
+                }
+                
+                devices.forEach(function(device) {
+                    const btn = document.createElement('div');
+                    btn.className = "bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between active:bg-slate-50 transition";
+                    btn.innerHTML = `<span class="font-bold text-sm">${device.name}</span><span class="text-xs text-slate-400">${device.id}</span>`;
+                    btn.onclick = function() { connect(device.id, device.name); };
+                    document.getElementById('msgList').appendChild(btn);
+                });
+            }, function(err) {
+                alert("Erreur Scan : " + err);
+            });
+        }
+
+        function connect(id, name) {
+            document.getElementById('status').innerText = "Connexion...";
+            document.getElementById('msgList').innerHTML = '<div class="text-center text-xs text-blue-500 mt-4">Connexion à ' + name + '...</div>';
+            
+            bluetoothSerial.connect(id, function() {
+                document.getElementById('status').innerText = "🟢 Connecté à " + name;
+                document.getElementById('msgList').innerHTML = '';
+                log("Connecté !", 'sys');
+            }, function(err) {
+                document.getElementById('status').innerText = "🔴 Erreur";
+                alert("Impossible de se connecter : " + err);
+            });
+        }
+
+        function send() {
+            const input = document.getElementById('input');
+            const txt = input.value;
+            if(!txt) return;
+            bluetoothSerial.write(txt + "\n", function() {
+                log(txt, 'me');
+                input.value = '';
+            }, function() { alert("Erreur d'envoi"); });
+        }
+    </script>
+</body>
+</html>
