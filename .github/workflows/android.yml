@@ -1,0 +1,21 @@
+name: Build
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { java-version: '17', distribution: 'zulu' }
+      - run: |
+          npm install
+          npx cap add android
+          # Injection AGRESSIVE des permissions
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+          cd android && chmod +x gradlew && ./gradlew assembleDebug
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/BT-CHAT-COMPLIANCE.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: APK-V9-COMPLIANCE, path: android/app/build/outputs/apk/debug/BT-CHAT-COMPLIANCE.apk }
